@@ -8,8 +8,18 @@
 #include "driver/gpio.h"
 
 //define the GPIO for the button function
-#define PLAY_BUTTON (GPIO_NUM_0)
+#define BOOT_BUTTON (GPIO_NUM_0)
 static const char *TAG = "Program";
+
+//interrupt defines
+#define ESP_INR_FLAG_DEFAULT 0
+
+//GPIO masks
+#define INPUT_PIN_SEL  ((BIT64(BOOT_BUTTON)))
+
+//queue define
+static QueueHandle_t gpio_evt_queue = NULL;
+
 
 /************* TinyUSB descriptors ****************/
 
@@ -69,7 +79,16 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
 {
 }
 
+/***** Interrupt and queue handling *****/
 
+static void IRAM_ATTR gpio_isr_handler(void* arg)
+{
+    uint32_t gpio_num = (uint32_t) arg;
+    xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
+}
+
+
+/******* Functions *******/
 
 void send_A() {
     // Keyboard output: Send key 'a/A' pressed and released
@@ -81,19 +100,47 @@ void send_A() {
 
 }
 
+/******** Tasks ********/
+
+static void gpio_task (void *arg)
+{
+    uint32_t io_num;
+    for(;;) {
+        if(xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
+            send_A();
+        }
+    }
+
+}
+
+
+
 
 void app_main(void)
 {
-    // Initialize button that will trigger HID reports
-    const gpio_config_t boot_button_config = {
-        .pin_bit_mask = BIT64(PLAY_BUTTON),
+    // Initialize buttons that will trigger HID reports
+    const gpio_config_t io_config = {
+        .pin_bit_mask = INPUT_PIN_SEL,
         .mode = GPIO_MODE_INPUT,
-        .intr_type = GPIO_INTR_DISABLE,
+        .intr_type = GPIO_INTR_POSEDGE,
         .pull_up_en = true,
         .pull_down_en = false,
     };
-    ESP_ERROR_CHECK(gpio_config(&boot_button_config));
+    ESP_ERROR_CHECK(gpio_config(&io_config));
 
+    // Create a queue to handle button press events from ISR
+    gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
+
+    // Start tasks
+    xTaskCreate(gpio_task, "gpio_task", 2048, NULL, 10, NULL);
+
+    // Install ISR service with default configuration
+    ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INR_FLAG_DEFAULT));
+
+    // Attach the interrupt service routine
+    ESP_ERROR_CHECK(gpio_isr_handler_add(BOOT_BUTTON, gpio_isr_handler, (void*) BOOT_BUTTON));
+
+    /***** Config USB *****/
     ESP_LOGI(TAG, "USB initialization");
     const tinyusb_config_t tusb_cfg = {
         .device_descriptor = NULL,
@@ -106,13 +153,6 @@ void app_main(void)
     ESP_LOGI(TAG, "USB initialization DONE");
 
     while (1) {
-        if (tud_mounted()) {
-            static bool send_hid_data = true;
-            if (send_hid_data) {
-                send_A();
-            }
-            send_hid_data = !gpio_get_level(PLAY_BUTTON);
-        }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
