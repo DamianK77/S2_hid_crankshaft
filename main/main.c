@@ -90,10 +90,9 @@ static void IRAM_ATTR gpio_isr_handler(void* arg)
 
 /******* Functions *******/
 
-void send_A() {
-    // Keyboard output: Send key 'a/A' pressed and released
+void send_keycode(uint16_t input_keycode) {
     ESP_LOGI(TAG, "Sending Keyboard report");
-    uint8_t keycode[6] = {HID_KEY_A};
+    uint8_t keycode[6] = {input_keycode};
     tud_hid_keyboard_report(HID_ITF_PROTOCOL_KEYBOARD, 0, keycode);
     vTaskDelay(pdMS_TO_TICKS(50));
     tud_hid_keyboard_report(HID_ITF_PROTOCOL_KEYBOARD, 0, NULL);
@@ -106,12 +105,12 @@ static void gpio_task (void *arg)
 {
     uint32_t io_num;
     for(;;) {
-        if(xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
+        if(xQueueReceive(gpio_evt_queue, &io_num, pdMS_TO_TICKS(100))) {
             //debouncing delay
-            vTaskDelay(pdMS_TO_TICKS(100));
-            if (gpio_get_level(io_num) == 1) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            if (gpio_get_level(io_num) == 0) {
                 ESP_LOGI(TAG, "Button pressed");
-                send_A();
+                send_keycode(HID_KEY_A);
                 xQueueReset(gpio_evt_queue);
             }
         }
