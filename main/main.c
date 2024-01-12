@@ -8,7 +8,7 @@
 #include "driver/gpio.h"
 
 //define the GPIO for the button function
-#define BOOT_BUTTON (GPIO_NUM_0)
+#define BOOT_BUTTON (GPIO_NUM_16)
 static const char *TAG = "Program";
 
 //interrupt defines
@@ -107,7 +107,13 @@ static void gpio_task (void *arg)
     uint32_t io_num;
     for(;;) {
         if(xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
-            send_A();
+            //debouncing delay
+            vTaskDelay(pdMS_TO_TICKS(100));
+            if (gpio_get_level(io_num) == 1) {
+                ESP_LOGI(TAG, "Button pressed");
+                send_A();
+                xQueueReset(gpio_evt_queue);
+            }
         }
     }
 
